@@ -1,515 +1,268 @@
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+
+# রেন্ডারের পোর্ট সমস্যা সমাধানের জন্য সার্ভার (এটি ব্যাকগ্রাউন্ডে চলবে)
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), BaseHTTPRequestHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
+
+# আপনার আসল প্রজেক্ট বা বটের কোড এখানে থাকবে
+print("বট সফলভাবে চালু হচ্ছে...")
+
+# আপনার যদি নিজস্ব কোড থাকে, সেটি এর নিচে বসাতে পারেন।
 import json
 import os
-from telegram import (
-    BotCommand,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    Update,
-)
-from telegram.ext import (
-    ApplicationBuilder,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+import threading
+import time
+import requests
+import telebot
+from telebot import types
 
-TOKEN = "8917438304:AAFqa1AuP2uDQu70KU4vYQztnxeuCxMmE_8"
-SUPPORT_ADMIN = "@Filereceive123"
-CHANNEL_URL = "https://t.me/BackupInstagramFacebookTopMarket"
-MIN_WITHDRAW = 100.00
-ADMIN_ID = "7633418734"
+# আপনার দেওয়া টোকেন এবং এডমিন আইডি এখানে বসানো আছে
+TOKEN = "8802240153:AAEnnbsfOCykXufnCwwq39CcyPBxjZC8FcY"
+ADMIN_ID = 7633418734
+URL = "http://skysysx.net/e/boss"
 
-DATA_FILE = "user_data.json"
-user_states = {}
+bot = telebot.TeleBot(TOKEN)
+USERS_FILE = "users.json"
+CONFIG_FILE = "config.json"
 
 
-def load_data():
-  if os.path.exists(DATA_FILE):
-    try:
-      with open(DATA_FILE, "r") as f:
-        content = f.read()
-        if not content.strip():
-          return {
-              "balances": {},
-              "tasks": {},
-              "referrals": {},
-              "uids": [],
-              "lang": {},
-              "configured_users": [],
-              "rates": {"insta_2fa": 3.0, "insta_cookies": 3.0, "fb_cookies": 3.0},
-              "tutorials": {
-                  "insta_2fa": "https://youtu.be/wH30NuA1NBA",
-                  "insta_cookies": "https://youtu.be/wH30NuA1NBA",
-                  "fb_cookies": "https://youtu.be/wH30NuA1NBA",
-              },
-          }
-        data = json.loads(content)
-        if "configured_users" not in data:
-          data["configured_users"] = []
-        if "rates" not in data:
-          data["rates"] = {
-              "insta_2fa": 3.0,
-              "insta_cookies": 3.0,
-              "fb_cookies": 3.0,
-          }
-        if "tutorials" not in data:
-          data["tutorials"] = {
-              "insta_2fa": "https://youtu.be/wH30NuA1NBA",
-              "insta_cookies": "https://youtu.be/wH30NuA1NBA",
-              "fb_cookies": "https://youtu.be/wH30NuA1NBA",
-          }
-        return data
-    except Exception:
-      pass
-  return {
-      "balances": {},
-      "tasks": {},
-      "referrals": {},
-      "uids": [],
-      "lang": {},
-      "configured_users": [],
-      "rates": {"insta_2fa": 3.0, "insta_cookies": 3.0, "fb_cookies": 3.0},
-      "tutorials": {
-          "insta_2fa": "https://youtu.be/wH30NuA1NBA",
-          "insta_cookies": "https://youtu.be/wH30NuA1NBA",
-          "fb_cookies": "https://youtu.be/wH30NuA1NBA",
-      },
-  }
+# ইউজার লোড ও সেভ করার ফাংশন
+def load_users():
+  if os.path.exists(USERS_FILE):
+    with open(USERS_FILE, "r") as f:
+      try:
+        return set(json.load(f))
+      except:
+        return set()
+  return set()
 
 
-def save_data(data):
-  with open(DATA_FILE, "w") as f:
-    json.dump(data, f, indent=4)
+def save_users(users_set):
+  with open(USERS_FILE, "w") as f:
+    json.dump(list(users_set), f)
 
 
-db = load_data()
+users = load_users()
+
+# ডিফল্ট মেসেজ সেটআপ (প্রিমিয়াম ইমোজি সহ)
+default_config = {
+    "msg_on": (
+        "🚀 **Link On!** 🚀\n\n✅ আপনারা সবাই আনলিমিটেড একাউন্ট সাবমিট করুন"
+        " ✅🤝\n\n📢 অবশ্যই আমাদের অফিসিয়াল টেলিগ্রাম চ্যানেলে জয়েন"
+        " করবেন।\n\n🔗 **টেলিগ্রাম চ্যানেল লিংক 👇**\nhttps://t.me/+ArhD5R5-d6k3ZjVl"
+    ),
+    "msg_off": (
+        "📴 **Link Off!** 📴\n\n⏳ আপনারা সবাই অপেক্ষা করুন, লিংক আবার অন"
+        " হবে। 🔄\n\n📢 অবশ্যই আমাদের অফিসিয়াল টেলিগ্রাম চ্যানেলে জয়েন"
+        " করবেন।\n\n🔗 **টেলিগ্রাম চ্যানেল লিংক 👇**\nhttps://t.me/+ArhD5R5-d6k3ZjVl"
+    ),
+}
 
 
-async def setup_bot_commands(app):
-  commands = [
-      BotCommand("start", "বট রিস্টার্ট করুন"),
-  ]
-  await app.bot.set_my_commands(commands)
+def load_config():
+  if os.path.exists(CONFIG_FILE):
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+      try:
+        return json.load(f)
+      except:
+        return default_config
+  return default_config
 
 
+def save_config(config):
+  with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    json.dump(config, f, ensure_ascii=False, indent=4)
+
+
+config = load_config()
+
+
+# নিচের কিবোর্ডে "বিস্তারিত জানুন ℹ️" বাটন তৈরি করার ফাংশন
 def get_main_keyboard():
-  menu_buttons = [
-      ["📇 কাজ ▸", "💵 ব্যালেন্স"],
-      ["💸 টাকা উত্তোলন", "🎁 My Referrals"],
-      ["👨‍💻 সাপোর্ট", "🙋‍♂️ আমি নতুন"],
-  ]
-  return ReplyKeyboardMarkup(menu_buttons, resize_keyboard=True)
+  markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+  details_btn = types.KeyboardButton("বিস্তারিত জানুন ℹ️")
+  markup.add(details_btn)
+  return markup
 
 
-# /start কমান্ড
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  user_id = str(update.message.from_user.id)
-  args = context.args
-
-  if user_id not in db["balances"]:
-    db["balances"][user_id] = 0.0
-  if user_id not in db["tasks"]:
-    db["tasks"][user_id] = []
-  if "configured_users" not in db:
-    db["configured_users"] = []
-
-  if args and args[0].isdigit():
-    ref_id = args[0]
-    if ref_id != user_id and ref_id in db["balances"]:
-      if (
-          "referrals" in db
-          and user_id not in db["referrals"].get(ref_id, [])
-      ):
-        if ref_id not in db["referrals"]:
-          db["referrals"][ref_id] = []
-        db["referrals"][ref_id].append(user_id)
-        db["balances"][ref_id] += 5.0
-
-  save_data(db)
-
-  # যদি ইউজার আগে থেকেই ভাষা ও চ্যানেল সেটআপ করে থাকে তবে সরাসরি মূল মেনু
-  if user_id in db["configured_users"]:
-    await update.message.reply_text(
-        "👇 মূল মেনু:", reply_markup=get_main_keyboard()
+# বটের বাম পাশের থ্রি-ডট মেনুতে কমান্ড সেট করার ফাংশন
+def set_bot_commands():
+  try:
+    bot.set_my_commands(
+        [types.BotCommand("start", "বট স্টার্ট বা রিফ্রেশ করুন 🚀")]
     )
-    return
+  except Exception as e:
+    print("Command set error:", e)
 
-  # ১. প্রথমবার স্টার্ট করলে স্বাগতম ও ডেসক্রিপশন
+
+# /start কমান্ড দিলে প্রিমিয়াম ওয়েলকাম মেসেজ শো করবে
+@bot.message_handler(commands=["start"])
+def send_welcome(message):
+  chat_id = message.chat.id
+  if chat_id not in users:
+    users.add(chat_id)
+    save_users(users)
+
   welcome_text = (
-      "🎉 **আমাদের আয়ের প্ল্যাটফর্মে আপনাকে স্বাগতম!**\n\n"
-      "এখানে আপনি খুব সহজে বিভিন্ন ছোট কাজ করে টাকা আয় করতে পারবেন এবং তা বিকাশ বা"
-      " নগদের মাধ্যমে উত্তোলন করতে পারবেন।"
-  )
-  await update.message.reply_text(welcome_text, parse_mode="Markdown")
-
-  # ২. ভাষা চয়েজ করার অপশন পাঠানো
-  lang_keyboard = [
-      [
-          InlineKeyboardButton("🇧🇩 বাংলা", callback_data="lang_bn"),
-          InlineKeyboardButton("🇺🇸 English", callback_data="lang_en"),
-      ]
-  ]
-  await update.message.reply_text(
-      "🌐 অনুগ্রহ করে আপনার পছন্দের ভাষাটি সিলেক্ট করুন:",
-      reply_markup=InlineKeyboardMarkup(lang_keyboard),
+      "🌟 **স্বাগতম!** 🌟\n\n🎯 আমাদের কুকিজ সাবমিট লিংক অন হওয়া মাত্রই"
+      " আপনাকে আমাদের অফিসিয়াল বট নোটিফিকেশন দিয়ে দিবে। ⚡️\n\n📢 অনুগ্রহ"
+      " করে বট ফলো করুন এবং গুরুত্বপূর্ণ আপডেট পেতে আমাদের অফিসিয়াল চ্যানেল"
+      " ফলো করুন। 👇\n\n🔗 **আমাদের অফিসিয়াল চ্যানেল লিংক:**\nhttps://t.me/+ArhD5R5-d6k3ZjVl"
   )
 
-
-# অ্যাডমিন প্যানেল কমান্ড (/admin)
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  user_id = str(update.message.from_user.id)
-  if user_id != ADMIN_ID:
-    return
-
-  admin_keyboard = [
-      [
-          InlineKeyboardButton("📊 স্ট্যাটিস্টিক্স", callback_data="adm_stats"),
-          InlineKeyboardButton("💰 রেট পরিবর্তন", callback_data="adm_rates"),
-      ],
-      [
-          InlineKeyboardButton(
-              "📺 টিউটোরিয়াল লিংক", callback_data="adm_tutorials"
-          )
-      ],
-  ]
-  await update.message.reply_text(
-      "⚙️ **অ্যাডমিন কন্ট্রোল প্যানেল:**\nনিচের অপশনগুলো থেকে ম্যানেজ করুন:",
-      reply_markup=InlineKeyboardMarkup(admin_keyboard),
+  bot.reply_to(
+      message,
+      welcome_text,
       parse_mode="Markdown",
+      reply_markup=get_main_keyboard(),
   )
 
 
-# ভাষা সিলেক্ট, চ্যানেল এবং অ্যাডমিন হ্যান্ডলার
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  query = update.callback_query
-  user_id = str(query.from_user.id)
-  await query.answer()
-
-  if query.data.startswith("lang_"):
-    lang = query.data.split("_")[-1]
-    db["lang"][user_id] = lang
-    save_data(db)
-
-    channel_keyboard = [
-        [
-            InlineKeyboardButton(
-                "📢 অফিসিয়াল চ্যানেলে জয়েন করুন", url=CHANNEL_URL
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "✅ চ্যানেলে জয়েন করা শেষ / এগিয়ে চলুন",
-                callback_data="finish_channel",
-            )
-        ],
-    ]
-    await query.message.edit_text(
-        "✅ ভাষা সফলভাবে সিলেক্ট করা হয়েছে!\n\nদয়া করে আমাদের অফিসিয়াল চ্যানেলে"
-        " জয়েন করুন এবং নিচের বাটনে চাপ দিন:",
-        reply_markup=InlineKeyboardMarkup(channel_keyboard),
-    )
-
-  elif query.data == "finish_channel":
-    if user_id not in db["configured_users"]:
-      db["configured_users"].append(user_id)
-      save_data(db)
-
-    await query.message.edit_text("🎉 **সব সেটআপ সম্পন্ন হয়েছে!**")
-    await context.bot.send_message(
-        chat_id=user_id,
-        text="👇 মূল মেনু:",
-        reply_markup=get_main_keyboard(),
-    )
-
-  elif query.data == "adm_stats" and user_id == ADMIN_ID:
-    total_users = len(db.get("balances", {}))
-    await query.message.edit_text(
-        f"📊 **বট স্ট্যাটিস্টিক্স:**\n👥 মোট রেজিস্টার্ড ইউজার: {total_users} জন"
-    )
-
-  elif query.data == "adm_rates" and user_id == ADMIN_ID:
-    rates_text = (
-        "💰 **বর্তমান রেটসমূহ:**\n"
-        f"- Instagram 2FA: {db['rates']['insta_2fa']} ৳\n"
-        f"- Instagram Cookies: {db['rates']['insta_cookies']} ৳\n"
-        f"- Facebook Cookies: {db['rates']['fb_cookies']} ৳\n\n"
-        "পরিবর্তন করতে চ্যাটে লিখুন:\n`Rate_insta_2fa নতুন_টাকা`"
-    )
-    await query.message.edit_text(rates_text, parse_mode="Markdown")
-
-  elif query.data == "adm_tutorials" and user_id == ADMIN_ID:
-    tut_text = (
-        "📺 **বর্তমান টিউটোরিয়াল লিংক:**\n"
-        f"- 2FA: {db['tutorials']['insta_2fa']}\n"
-        f"- IG Cookies: {db['tutorials']['insta_cookies']}\n"
-        f"- FB Cookies: {db['tutorials']['fb_cookies']}\n\n"
-        "পরিবর্তন করতে চ্যাটে লিখুন:\n`Tutorial_insta_2fa নতুন_লিংক`"
-    )
-    await query.message.edit_text(tut_text, parse_mode="Markdown")
+# ব্যবহারকারী যখন "বিস্তারিত জানুন ℹ️" বাটনে ক্লিক করবে
+@bot.message_handler(
+    func=lambda message: message.text == "বিস্তারিত জানুন ℹ️"
+)
+def show_details(message):
+  details_text = (
+      "💎 **কুকিজ কাজের বিস্তারিত তথ্য** 💎\n\n🔍 ইন্সটাগ্রাম কুকিজ কাজ"
+      " সম্পর্কে ডিটেইলসে সব তথ্য জানতে আমাদের অফিসিয়াল চ্যানেলে জয়েন"
+      " করুন এবং আমাদেরকে ইনবক্স করুন। 📩\n\n📌 **অফিসিয়াল চ্যানেল লিংক"
+      " 👇**\nhttps://t.me/+ArhD5R5-d6k3ZjVl"
+  )
+  bot.reply_to(
+      message,
+      details_text,
+      parse_mode="Markdown",
+      reply_markup=get_main_keyboard(),
+  )
 
 
-# সাধারণ মেসেজ ও কাজ জমা দেওয়ার হ্যান্ডলার
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  text = update.message.text
-  user_id = str(update.message.from_user.id)
+# --- এডমিন প্যানেল (পাসওয়ার্ড: munnanaim) ---
 
-  # অ্যাডমিন কমান্ড শর্টকাট চেক
-  if text.startswith("Rate_") and user_id == ADMIN_ID:
-    try:
-      parts = text.split(" ")
-      key = parts[0].replace("Rate_", "")
-      val = float(parts[1])
-      if key in db["rates"]:
-        db["rates"][key] = val
-        save_data(db)
-        await update.message.reply_text(
-            f"✅ {key} এর রেট সফলভাবে পরিবর্তন করে {val} ৳ করা হয়েছে!"
-        )
-      else:
-        await update.message.reply_text("❌ ভুল ক্যাটাগরি নাম!")
-    except Exception:
-      await update.message.reply_text(
-          "❌ ফরম্যাট ভুল! এভাবে লিখুন: `Rate_insta_2fa 4.0`",
-          parse_mode="Markdown",
-      )
+
+@bot.message_handler(commands=["admin"])
+def admin_panel(message):
+  if message.from_user.id != ADMIN_ID:
+    bot.reply_to(message, "দুঃখিত, আপনি এই কমান্ডটি ব্যবহার করার অনুমতি নেই।")
     return
 
-  elif text.startswith("Tutorial_") and user_id == ADMIN_ID:
-    try:
-      parts = text.split(" ")
-      key = parts[0].replace("Tutorial_", "")
-      link = parts[1]
-      if key in db["tutorials"]:
-        db["tutorials"][key] = link
-        save_data(db)
-        await update.message.reply_text(
-            f"✅ {key} এর টিউটোরিয়াল লিংক আপডেট করা হয়েছে!"
-        )
-      else:
-        await update.message.reply_text("❌ ভুল ক্যাটাগরি নাম!")
-    except Exception:
-      await update.message.reply_text(
-          "❌ ফরম্যাট ভুল! এভাবে লিখুন: `Tutorial_insta_2fa https://...`",
-          parse_mode="Markdown",
-      )
+  parts = message.text.split(maxsplit=1)
+  if len(parts) < 2 or parts[1] != "munnanaim":
+    bot.reply_to(
+        message,
+        "⚠️ ভুল পাসওয়ার্ড!\nসঠিক নিয়মে লিখুন: `/admin munnanaim`",
+        parse_mode="Markdown",
+    )
     return
 
-  if text == "🙋‍♂️ আমি নতুন":
-    guide_keyboard = [
-        ["📸 ইনস্টাগ্রাম গাইড"],
-        ["🟦 ফেসবুক গাইড"],
-        ["❌ বাতিল / ফিরে যান"],
-    ]
-    await update.message.reply_text(
-        "💡 **কোন প্ল্যাটফর্মের কাজের নিয়ম জানতে চান সিলেক্ট করুন:**",
-        reply_markup=ReplyKeyboardMarkup(guide_keyboard, resize_keyboard=True),
+  total_users = len(users)
+  panel_text = (
+      f"🛠 **বট এডমিন প্যানেল** 🛠\n\n👥 মোট ইউজার সংখ্যা: `{total_users}` জন\n\n"
+      f"📌 **বর্তমান ON মেসেজ:**\n{config['msg_on']}\n\n📌 **বর্তমান OFF"
+      f" মেসেজ:**\n{config['msg_off']}\n\n--- \n**মেসেজ পরিবর্তন করার"
+      " নিয়ম:**\n• ON মেসেজ বদলাতে লিখুন: `/seton আপনার নতুন লেখা`\n• OFF মেসেজ"
+      " বদলাতে লিখুন: `/setoff আপনার নতুন লেখা`"
+  )
+  bot.reply_to(message, panel_text, parse_mode="Markdown")
+
+
+# ON মেসেজ এডিট করার কমান্ড
+@bot.message_handler(commands=["seton"])
+def set_on_message(message):
+  if message.from_user.id != ADMIN_ID:
+    return
+
+  new_msg = message.text.replace("/seton", "").strip()
+  if not new_msg:
+    bot.reply_to(
+        message,
+        "দয়া করে মেসেজ লিখে দিন। যেমন: `/seton আপনার নতুন মেসেজ`",
         parse_mode="Markdown",
     )
+    return
 
-  elif text == "📸 ইনস্টাগ্রাম গাইড":
-    ig_guide_keyboard = [
-        ["Instagram 2fa গাইড"],
-        ["Instagram cookies গাইড"],
-        ["❌ বাতিল / ফিরে যান"],
-    ]
-    await update.message.reply_text(
-        "📸 ইনস্টাগ্রামের কোন কাজের ভিডিও দেখতে চান?",
-        reply_markup=ReplyKeyboardMarkup(ig_guide_keyboard, resize_keyboard=True),
-    )
+  config["msg_on"] = new_msg
+  save_config(config)
+  bot.reply_to(message, "✅ সফলভাবে লিংক ON হওয়ার মেসেজটি আপডেট করা হয়েছে!")
 
-  elif text == "Instagram 2fa গাইড":
-    link = db.get("tutorials", {}).get(
-        "insta_2fa", "https://youtu.be/wH30NuA1NBA"
-    )
-    await update.message.reply_text(
-        f"📺 **Instagram 2fa কাজের ভিডিও টিউটোরিয়াল:**\n{link}"
-    )
 
-  elif text == "Instagram cookies গাইড":
-    link = db.get("tutorials", {}).get(
-        "insta_cookies", "https://youtu.be/wH30NuA1NBA"
-    )
-    await update.message.reply_text(
-        f"📺 **Instagram cookies কাজের ভিডিও টিউটোরিয়াল:**\n{link}"
-    )
+# OFF মেসেজ এডিট করার কমান্ড
+@bot.message_handler(commands=["setoff"])
+def set_off_message(message):
+  if message.from_user.id != ADMIN_ID:
+    return
 
-  elif text in ["🟦 ফেসবুক গাইড", "Facebook cookies গাইড"]:
-    link = db.get("tutorials", {}).get("fb_cookies", "https://youtu.be/wH30NuA1NBA")
-    await update.message.reply_text(
-        f"📺 **Facebook cookies কাজের ভিডিও টিউটোরিয়াল:**\n{link}"
-    )
-
-  elif text == "📇 কাজ ▸":
-    task_keyboard = [
-        ["📸 ইনস্টাগ্রাম কাজ"],
-        ["🟦 ফেসবুক কাজ"],
-        ["❌ বাতিল / ফিরে যান"],
-    ]
-    await update.message.reply_text(
-        "🟣 **কাজের ক্যাটাগরি সিলেক্ট করুন:**",
-        reply_markup=ReplyKeyboardMarkup(task_keyboard, resize_keyboard=True),
+  new_msg = message.text.replace("/setoff", "").strip()
+  if not new_msg:
+    bot.reply_to(
+        message,
+        "দয়া করে মেসেজ লিখে দিন। যেমন: `/setoff আপনার নতুন মেসেজ`",
         parse_mode="Markdown",
     )
+    return
 
-  elif text == "📸 ইনস্টাগ্রাম কাজ":
-    insta_keyboard = [
-        ["Instagram 2fa"],
-        ["Instagram cookies"],
-        ["❌ বাতিল / ফিরে যান"],
-    ]
-    await update.message.reply_text(
-        "🟣 **ইনস্টাগ্রামের কাজটি সিলেক্ট করুন:**",
-        reply_markup=ReplyKeyboardMarkup(insta_keyboard, resize_keyboard=True),
-        parse_mode="Markdown",
-    )
+  config["msg_off"] = new_msg
+  save_config(config)
+  bot.reply_to(message, "✅ সফলভাবে লিংক OFF হওয়ার মেসেজটি আপডেট করা হয়েছে!")
 
-  elif text == "🟦 ফেসবুক কাজ":
-    fb_keyboard = [["Facebook cookies"], ["❌ বাতিল / ফিরে যান"]]
-    await update.message.reply_text(
-        "🟣 **ফেসবুকের কাজটি সিলেক্ট করুন:**",
-        reply_markup=ReplyKeyboardMarkup(fb_keyboard, resize_keyboard=True),
-        parse_mode="Markdown",
-    )
 
-  elif text in ["Instagram 2fa", "Instagram cookies", "Facebook cookies"]:
-    if text == "Instagram 2fa":
-      rate = db["rates"].get("insta_2fa", 3.0)
-      user_states[user_id] = "awaiting_insta_2fa"
-      msg_text = (
-          f"🔐 **Instagram 2fa কাজ**\n💰 রেট: {rate} ৳\n\n"
-          "📌 **যে অ্যাকাউন্টে কাজ করবেন:**\n"
-          "🔹 Username: `task_user_99`\n"
-          "🔹 Password: `Pass@12345`\n\n"
-          "👉 কাজটি সম্পন্ন করে আপনার **Submitted Username & Password / 2FA Code**"
-          " নিচে লিখে সেন্ড করুন:"
-      )
-    elif text == "Instagram cookies":
-      rate = db["rates"].get("insta_cookies", 3.0)
-      user_states[user_id] = "awaiting_insta_cookies"
-      msg_text = (
-          f"🍪 **Instagram cookies কাজ**\n💰 রেট: {rate} ৳\n\n"
-          "📌 **যে অ্যাকাউন্টে কাজ করবেন:**\n"
-          "🔹 Username: `insta_cookie_user`\n"
-          "🔹 Password: `CookiePass#88`\n\n"
-          "👉 কাজটি সম্পন্ন করে আপনার **Instagram Cookies (UID/Data)** নিচে লিখে"
-          " সেন্ড করুন:"
-      )
-    else:
-      rate = db["rates"].get("fb_cookies", 3.0)
-      user_states[user_id] = "awaiting_fb_cookies"
-      msg_text = (
-          f"🟦 **Facebook cookies কাজ**\n💰 রেট: {rate} ৳\n\n"
-          "📌 **যে অ্যাকাউন্টে কাজ করবেন:**\n"
-          "🔹 First Name: `Md Rahim`\n"
-          "🔹 Last Name: `Hasan`\n\n"
-          "👉 কাজটি সম্পন্ন করে আপনার **Facebook Cookies (UID/Data)** নিচে লিখে"
-          " সেন্ড করুন:"
-      )
-
-    action_keyboard = [["❌ বাতিল / ফিরে যান"]]
-    await update.message.reply_text(
-        msg_text,
-        reply_markup=ReplyKeyboardMarkup(action_keyboard, resize_keyboard=True),
-        parse_mode="Markdown",
-    )
-
-  elif user_states.get(user_id) in [
-      "awaiting_insta_2fa",
-      "awaiting_insta_cookies",
-      "awaiting_fb_cookies",
-  ]:
-    current_state = user_states.pop(user_id, None)
-    if "uids" not in db:
-      db["uids"] = []
-    db["uids"].append({
-        "user_id": user_id,
-        "type": current_state,
-        "submission": text,
-    })
-    save_data(db)
-
-    await update.message.reply_text(
-        "✅ **আপনার কাজ সফলভাবে জমা দেওয়া হয়েছে!**\nযাচাই শেষে আপনার ব্যালেন্স"
-        " যুক্ত করা হবে।",
-        reply_markup=get_main_keyboard(),
-        parse_mode="Markdown",
-    )
-
-  elif text == "💸 টাকা উত্তোলন":
-    bal = db["balances"].get(user_id, 0.0)
-    if bal < MIN_WITHDRAW:
-      await update.message.reply_text(
-          f"❌ আপনার পর্যাপ্ত ব্যালেন্স নেই!\nমিনিমাম উইথড্র **{MIN_WITHDRAW} ৳**।"
-          f" আপনার বর্তমান ব্যালেন্স: {bal:.2f} ৳",
+# সবার কাছে ব্রডকাস্ট মেসেজ পাঠানো
+def broadcast_message(message_text):
+  for chat_id in users:
+    try:
+      bot.send_message(
+          chat_id,
+          message_text,
           parse_mode="Markdown",
+          reply_markup=get_main_keyboard(),
       )
-    else:
-      user_states[user_id] = "awaiting_withdraw_number"
-      cancel_kb = [["❌ বাতিল / ফিরে যান"]]
-      await update.message.reply_text(
-          "💸 **উইথড্র করার জন্য আপনার বিকাশ বা নগদ নম্বরটি লিখুন:**",
-          reply_markup=ReplyKeyboardMarkup(cancel_kb, resize_keyboard=True),
-          parse_mode="Markdown",
-      )
+    except Exception as e:
+      print(f"Failed to send to {chat_id}: {e}")
 
-  elif user_states.get(user_id) == "awaiting_withdraw_number":
-    user_states.pop(user_id, None)
-    bal = db["balances"].get(user_id, 0.0)
-    db["balances"][user_id] = 0.0
-    save_data(db)
-    await update.message.reply_text(
-        f"✅ **আপনার উইথড্র রিকোয়েস্ট সফলভাবে গ্রহণ করা হয়েছে!**\nপরিমাণ: {bal}"
-        " ৳\nনম্বরে খুব শীঘ্রই পেমেন্ট পাঠিয়ে দেওয়া হবে।",
-        reply_markup=get_main_keyboard(),
-        parse_mode="Markdown",
-    )
 
-  elif text == "🎁 My Referrals":
-    bot_username = (await context.bot.get_me()).username
-    ref_link = f"https://t.me/{bot_username}?start={user_id}"
-    ref_count = len(db.get("referrals", {}).get(user_id, []))
-    await update.message.reply_text(
-        f"🎁 **আপনার রেফারেল লিংক:**\n{ref_link}\n\n👥 মোট রেফার করেছেন:"
-        f" **{ref_count} জন**\n*(প্রতি রেফারে ৫ টাকা বোনাস)*",
-        parse_mode="Markdown",
-    )
+# ওয়েবসাইট মনিটর করার ব্যাকগ্রাউন্ড লুপ
+def monitor_website():
+  last_status = None
+  print("Website monitoring started...")
 
-  elif text == "❌ বাতিল / ফিরে যান":
-    user_states.pop(user_id, None)
-    await update.message.reply_text(
-        "❌ বাতিল করা হয়েছে।", reply_markup=get_main_keyboard()
-    )
+  while True:
+    try:
+      response = requests.get(URL, timeout=10)
+      html_content = response.text
 
-  elif text == "👨‍💻 সাপোর্ট":
-    await update.message.reply_text(f"👨‍💻 যেকোনো প্রয়োজনে যোগাযোগ করুন: {SUPPORT_ADMIN}")
-  elif text == "💵 ব্যালেন্স":
-    bal = db["balances"].get(user_id, 0.0)
-    await update.message.reply_text(
-        f"💵 **আপনার বর্তমান ব্যালেন্স:** {bal:.2f} ৳", parse_mode="Markdown"
-    )
-  else:
-    await update.message.reply_text(
-        "ℹ️ সঠিক অপশন সিলেক্ট করুন বা নিচে কিবোর্ড ব্যবহার করুন।"
-    )
+      if "বায়ার এপিআই অফলাইন" in html_content:
+        current_status = "OFF"
+      else:
+        current_status = "ON"
+
+      if last_status is not None and current_status != last_status:
+        current_config = load_config()
+        if current_status == "ON":
+          broadcast_message(current_config["msg_on"])
+          print("[ALERT] Link turned ON. Broadcasted to all users.")
+        elif current_status == "OFF":
+          broadcast_message(current_config["msg_off"])
+          print("[ALERT] Link turned OFF. Broadcasted to all users.")
+
+      last_status = current_status
+
+    except Exception as e:
+      print("Connection error:", e)
+
+    time.sleep(30)
 
 
 if __name__ == "__main__":
-  app = ApplicationBuilder().token(TOKEN).post_init(setup_bot_commands).build()
+  set_bot_commands()  # বাম পাশের মেনু সেটআপ রান করা
+  t = threading.Thread(target=monitor_website)
+  t.daemon = True
+  t.start()
 
-  app.add_handler(CommandHandler("start", start))
-  app.add_handler(CommandHandler("admin", admin_panel))
-  app.add_handler(
-      CallbackQueryHandler(
-          callback_handler,
-          pattern="^(lang_|finish_channel|adm_stats|adm_rates|adm_tutorials)",
-      )
-  )
-  app.add_handler(
-      MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-  )
-
-  print("বট সফলভাবে চালু হচ্ছে...")
-  app.run_polling()
+  print("Bot is running successfully with all features!")
+  bot.polling()
